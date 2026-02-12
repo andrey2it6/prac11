@@ -1,0 +1,57 @@
+version: '3.8'
+
+services:
+  # PHP-сервер для legacy системы
+  php:
+    image: php:8.1-apache
+    container_name: library_php
+    ports:
+      - "8001:80"
+    volumes:
+      - ./php:/var/www/html
+    environment:
+      - APACHE_RUN_USER=www-data
+      - APACHE_RUN_GROUP=www-data
+    networks:
+      - library_network
+    command: >
+      bash -c "
+      docker-php-ext-install soap pdo pdo_sqlite &&
+      apache2ctl start &&
+      tail -f /dev/null
+      "
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health.php"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Node.js сервер для современной системы
+  node:
+    image: node:18-alpine
+    container_name: library_node
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./nodejs:/app
+      - /app/node_modules
+    working_dir: /app
+    environment:
+      - NODE_ENV=development
+      - SOAP_SERVER_URL=http://php/soap-server.php
+      - DATABASE_PATH=/app/data
+    networks:
+      - library_network
+    command: sh -c "npm install && npm start"
+    depends_on:
+      php:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+networks:
+  library_network:
+    driver: bridge
